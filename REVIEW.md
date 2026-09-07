@@ -7,6 +7,60 @@ This repository contains a small WordPress plugin with two frontend behaviors:
 
 There is no build step and no remote frontend library.
 
+## Implementation Options
+
+### Option 1: WordPress Plugin
+
+This repository implements this option.
+
+Use the plugin when the target site is a WordPress site and administrators can
+install or network-activate plugins. This is the preferred option for DaData INN
+lookup because the DaData token stays on the WordPress server.
+
+The plugin provides:
+
+- a WordPress settings page;
+- per-site settings on Multisite;
+- a server-side REST proxy for DaData requests;
+- frontend autocomplete for the configured INN/company field;
+- optional UTM and `pageref` forwarding for external links.
+
+### Option 2: Manual Site Integration
+
+Use this option only when installing a WordPress plugin is not possible.
+
+For UTM and `pageref`, the manual integration can be a small JavaScript file
+inserted into the page template or tag manager. It does not need WordPress and
+can run on any internal site where forwarding incoming campaign parameters to
+external links is required.
+
+For DaData INN lookup, a frontend-only snippet is not enough because the DaData
+token must not be exposed in browser JavaScript. A safe manual implementation
+still needs a server-side proxy in the site's backend. The browser sends the INN
+query to that proxy, and the proxy calls DaData with the token stored in server
+configuration.
+
+The manual variant should therefore include:
+
+- one small frontend autocomplete script;
+- one backend endpoint that validates input and calls DaData;
+- server-side token storage;
+- graceful empty/error responses;
+- UTM and `pageref` forwarding only if the site needs link tracking.
+
+This repository does not ship that manual variant as a separate package. It is
+documented here only as an alternative implementation approach for sites where
+plugins cannot be installed.
+
+## Site Scope
+
+DaData INN/company lookup is intended only for Russian flows where organization
+lookup by INN is relevant.
+
+UTM and `pageref` forwarding is not Russia-specific. It can be used on internal
+sites in any region when campaign/source parameters need to be passed to
+external form links.
+
 ## Files to Review
 
 ```text
