@@ -119,4 +119,5 @@ dadata-suggestions.php   Plugin bootstrap, settings, REST proxy.
 assets/dadata-inn.js     Frontend autocomplete.
 assets/tracking.js       UTM and pageref forwarding.
 uninstall.php            Option cleanup.
+REVIEW.md                Review checklist and smoke-test steps.
 ```
