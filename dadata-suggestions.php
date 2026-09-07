@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DaData INN Suggestions
  * Description:       Adds DaData-powered INN/company suggestions to selected WordPress form fields.
- * Version:           2.0.0
+ * Version:           2.0.1
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Author:            1kuzz
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'DADATA_SUGG_VERSION', '2.0.0' );
+define( 'DADATA_SUGG_VERSION', '2.0.1' );
 define( 'DADATA_SUGG_OPTION', 'dadata_suggestions_options' );
 define(
 	'DADATA_SUGG_ENDPOINT',

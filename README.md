@@ -18,7 +18,7 @@ Tested on WordPress Multisite 6.9 with PHP 8.1.
 
 ### WordPress admin
 
-1. Download `dadata-suggestions-2.0.0.zip` from the latest GitHub release.
+1. Download `dadata-suggestions-2.0.1.zip` from the latest GitHub release.
 2. In WordPress admin, open Plugins, Add New, Upload Plugin.
 3. Upload the ZIP and activate it.
 
