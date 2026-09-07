@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0
+## 2.0.0 - 2026-09-07
 
 - Focused the plugin on DaData INN/company lookup.
 - Replaced frontend token usage with a server-side REST proxy.

@@ -18,8 +18,7 @@ Tested on WordPress Multisite 6.9 with PHP 8.1.
 
 ### WordPress admin
 
-1. Create a ZIP that contains the plugin directory:
-   `dadata-suggestions/dadata-suggestions.php`, `assets/`, and `uninstall.php`.
+1. Download `dadata-suggestions-2.0.0.zip` from the latest GitHub release.
 2. In WordPress admin, open Plugins, Add New, Upload Plugin.
 3. Upload the ZIP and activate it.
 
