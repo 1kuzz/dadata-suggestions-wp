@@ -1,222 +1,474 @@
 <?php
 /**
- * Plugin Name: DaData Suggestions
- * Description: Подключает подсказки DaData.ru (адрес, ФИО, организация, email) к полям форм на сайте. Есть быстрый пресет для WooCommerce и проверка ключа.
- * Version: 1.1.0
- * License: MIT
+ * Plugin Name:       DaData INN Suggestions
+ * Description:       Adds DaData-powered INN/company suggestions to selected WordPress form fields.
+ * Version:           2.0.0
+ * Requires at least: 5.8
+ * Requires PHP:      7.4
+ * Author:            1kuzz
+ * License:           MIT
+ * Text Domain:       dadata-suggestions
+ *
+ * @package Dadata_Suggestions
  */
 
-defined('ABSPATH') || exit;
-
-define('DADATA_SUGG_OPTION', 'dadata_suggestions_options');
-define('DADATA_SUGG_LIB_VERSION', '16.10.3');
-
-function dadata_suggestions_defaults() {
-    return array(
-        'enabled'                 => '1',
-        'api_key'                 => '',
-        'address_selector'        => '',
-        'address_postcode_selector' => '',
-        'address_city_selector'   => '',
-        'address_region_selector' => '',
-        'fio_selector'            => '',
-        'party_selector'          => '',
-        'email_selector'          => '',
-        'bank_selector'           => '',
-    );
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
 }
 
-function dadata_suggestions_get_options() {
-    return wp_parse_args(get_option(DADATA_SUGG_OPTION, array()), dadata_suggestions_defaults());
+define( 'DADATA_SUGG_VERSION', '2.0.0' );
+define( 'DADATA_SUGG_OPTION', 'dadata_suggestions_options' );
+define(
+	'DADATA_SUGG_ENDPOINT',
+	'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party'
+);
+
+/**
+ * Small DaData INN suggestions plugin.
+ */
+final class Dadata_Suggestions_Plugin {
+	const REST_NAMESPACE = 'dadata-suggestions/v1';
+
+	/**
+	 * Boot hooks.
+	 */
+	public static function init() {
+		add_action( 'admin_menu', array( __CLASS__, 'admin_menu' ) );
+		add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
+		add_action( 'rest_api_init', array( __CLASS__, 'register_rest_routes' ) );
+		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_frontend' ) );
+		add_filter(
+			'plugin_action_links_' . plugin_basename( __FILE__ ),
+			array( __CLASS__, 'action_links' )
+		);
+	}
+
+	/**
+	 * Default settings.
+	 *
+	 * @return array<string, string>
+	 */
+	public static function defaults() {
+		return array(
+			'dadata_enabled'   => '0',
+			'dadata_token'     => '',
+			'inn_selector'     => '#company',
+			'name_selector'    => '',
+			'kpp_selector'     => '',
+			'ogrn_selector'    => '',
+			'address_selector' => '',
+			'tracking_enabled' => '0',
+		);
+	}
+
+	/**
+	 * Current settings.
+	 *
+	 * @return array<string, string>
+	 */
+	public static function options() {
+		$options = get_option( DADATA_SUGG_OPTION, array() );
+
+		return wp_parse_args( is_array( $options ) ? $options : array(), self::defaults() );
+	}
+
+	/**
+	 * Sanitize Settings API input.
+	 *
+	 * @param mixed $input Raw input.
+	 * @return array<string, string>
+	 */
+	public static function sanitize_options( $input ) {
+		$input = is_array( $input ) ? $input : array();
+		$clean = self::defaults();
+
+		$clean['dadata_enabled']   = empty( $input['dadata_enabled'] ) ? '0' : '1';
+		$clean['tracking_enabled'] = empty( $input['tracking_enabled'] ) ? '0' : '1';
+
+		$text_keys = array(
+			'dadata_token',
+			'inn_selector',
+			'name_selector',
+			'kpp_selector',
+			'ogrn_selector',
+			'address_selector',
+		);
+
+		foreach ( $text_keys as $key ) {
+			$value = isset( $input[ $key ] ) && is_scalar( $input[ $key ] ) ? $input[ $key ] : '';
+			$clean[ $key ] = sanitize_text_field( (string) wp_unslash( $value ) );
+		}
+
+		return $clean;
+	}
+
+	/**
+	 * Register admin settings.
+	 */
+	public static function register_settings() {
+		register_setting(
+			'dadata_suggestions',
+			DADATA_SUGG_OPTION,
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_options' ),
+				'default'           => self::defaults(),
+			)
+		);
+	}
+
+	/**
+	 * Add settings page.
+	 */
+	public static function admin_menu() {
+		add_options_page(
+			__( 'DaData INN Suggestions', 'dadata-suggestions' ),
+			__( 'DaData INN', 'dadata-suggestions' ),
+			'manage_options',
+			'dadata-suggestions',
+			array( __CLASS__, 'render_settings_page' )
+		);
+	}
+
+	/**
+	 * Settings page markup.
+	 */
+	public static function render_settings_page() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		$options = self::options();
+		$name    = DADATA_SUGG_OPTION;
+		?>
+		<div class="wrap">
+			<h1><?php esc_html_e( 'DaData INN Suggestions', 'dadata-suggestions' ); ?></h1>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'dadata_suggestions' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'DaData INN suggestions', 'dadata-suggestions' ); ?></th>
+						<td>
+							<label>
+								<input
+									type="checkbox"
+									name="<?php echo esc_attr( $name ); ?>[dadata_enabled]"
+									value="1"
+									<?php checked( $options['dadata_enabled'], '1' ); ?>
+								/>
+								<?php esc_html_e( 'Enable company lookup by INN', 'dadata-suggestions' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">
+							<label for="dadata-token">
+								<?php esc_html_e( 'DaData API token', 'dadata-suggestions' ); ?>
+							</label>
+						</th>
+						<td>
+							<input
+								id="dadata-token"
+								class="regular-text"
+								type="password"
+								autocomplete="off"
+								name="<?php echo esc_attr( $name ); ?>[dadata_token]"
+								value="<?php echo esc_attr( $options['dadata_token'] ); ?>"
+							/>
+							<p class="description">
+								<?php esc_html_e( 'Used only by the server-side REST proxy.', 'dadata-suggestions' ); ?>
+							</p>
+						</td>
+					</tr>
+					<?php
+					self::text_row(
+						'inn_selector',
+						__( 'INN/company field selector', 'dadata-suggestions' ),
+						$options['inn_selector']
+					);
+					self::text_row(
+						'name_selector',
+						__( 'Company name field selector', 'dadata-suggestions' ),
+						$options['name_selector']
+					);
+					self::text_row(
+						'kpp_selector',
+						__( 'KPP field selector', 'dadata-suggestions' ),
+						$options['kpp_selector']
+					);
+					self::text_row(
+						'ogrn_selector',
+						__( 'OGRN field selector', 'dadata-suggestions' ),
+						$options['ogrn_selector']
+					);
+					self::text_row(
+						'address_selector',
+						__( 'Address field selector', 'dadata-suggestions' ),
+						$options['address_selector']
+					);
+					?>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Link tracking', 'dadata-suggestions' ); ?></th>
+						<td>
+							<label>
+								<input
+									type="checkbox"
+									name="<?php echo esc_attr( $name ); ?>[tracking_enabled]"
+									value="1"
+									<?php checked( $options['tracking_enabled'], '1' ); ?>
+								/>
+								<?php esc_html_e( 'Forward UTM and pageref to external links', 'dadata-suggestions' ); ?>
+							</label>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button(); ?>
+			</form>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render a selector row.
+	 *
+	 * @param string $key   Option key.
+	 * @param string $label Row label.
+	 * @param string $value Current value.
+	 */
+	private static function text_row( $key, $label, $value ) {
+		$name = DADATA_SUGG_OPTION;
+		?>
+		<tr>
+			<th scope="row">
+				<label for="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></label>
+			</th>
+			<td>
+				<input
+					id="<?php echo esc_attr( $key ); ?>"
+					class="regular-text"
+					type="text"
+					name="<?php echo esc_attr( $name ); ?>[<?php echo esc_attr( $key ); ?>]"
+					value="<?php echo esc_attr( $value ); ?>"
+					placeholder="#company"
+				/>
+			</td>
+		</tr>
+		<?php
+	}
+
+	/**
+	 * Register REST endpoints.
+	 */
+	public static function register_rest_routes() {
+		register_rest_route(
+			self::REST_NAMESPACE,
+			'/party',
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( __CLASS__, 'rest_party' ),
+				'permission_callback' => array( __CLASS__, 'rest_permission' ),
+				'args'                => array(
+					'query' => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+					),
+				),
+			)
+		);
+	}
+
+	/**
+	 * Verify REST nonce for public frontend requests.
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return bool
+	 */
+	public static function rest_permission( WP_REST_Request $request ) {
+		$nonce = $request->get_header( 'X-WP-Nonce' );
+
+		return $nonce && wp_verify_nonce( $nonce, 'wp_rest' );
+	}
+
+	/**
+	 * Proxy an INN/company query to DaData.
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return WP_REST_Response|WP_Error
+	 */
+	public static function rest_party( WP_REST_Request $request ) {
+		$options = self::options();
+
+		if ( '1' !== $options['dadata_enabled'] || '' === trim( $options['dadata_token'] ) ) {
+			return new WP_Error(
+				'dadata_disabled',
+				__( 'DaData suggestions are disabled.', 'dadata-suggestions' ),
+				array( 'status' => 403 )
+			);
+		}
+
+		$query = trim( (string) $request->get_param( 'query' ) );
+		$query = preg_replace( '/[^\p{L}\p{N}\s"\'.,\-]/u', '', $query );
+
+		if ( null === $query || strlen( $query ) < 3 ) {
+			return rest_ensure_response( array( 'suggestions' => array() ) );
+		}
+
+		$response = wp_remote_post(
+			DADATA_SUGG_ENDPOINT,
+			array(
+				'headers' => array(
+					'Accept'        => 'application/json',
+					'Authorization' => 'Token ' . trim( $options['dadata_token'] ),
+					'Content-Type'  => 'application/json',
+				),
+				'body'    => wp_json_encode(
+					array(
+						'query' => $query,
+						'count' => 5,
+					)
+				),
+				'timeout' => 8,
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return new WP_Error(
+				'dadata_request_failed',
+				__( 'DaData API is unavailable.', 'dadata-suggestions' ),
+				array( 'status' => 502 )
+			);
+		}
+
+		$code = wp_remote_retrieve_response_code( $response );
+		if ( 200 !== $code ) {
+			return new WP_Error(
+				'dadata_bad_response',
+				__( 'DaData API returned an error.', 'dadata-suggestions' ),
+				array( 'status' => 502 )
+			);
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+		if (
+			! is_array( $body )
+			|| ! isset( $body['suggestions'] )
+			|| ! is_array( $body['suggestions'] )
+		) {
+			return rest_ensure_response( array( 'suggestions' => array() ) );
+		}
+
+		return rest_ensure_response(
+			array(
+				'suggestions' => array_map(
+					array( __CLASS__, 'map_suggestion' ),
+					array_slice( $body['suggestions'], 0, 5 )
+				),
+			)
+		);
+	}
+
+	/**
+	 * Keep only fields the frontend needs.
+	 *
+	 * @param array<string, mixed> $suggestion Raw DaData suggestion.
+	 * @return array<string, string>
+	 */
+	private static function map_suggestion( $suggestion ) {
+		$data = isset( $suggestion['data'] ) && is_array( $suggestion['data'] )
+			? $suggestion['data']
+			: array();
+		$name = '';
+
+		if ( isset( $data['name']['short_with_opf'] ) ) {
+			$name = $data['name']['short_with_opf'];
+		} elseif ( isset( $data['name']['full_with_opf'] ) ) {
+			$name = $data['name']['full_with_opf'];
+		}
+
+		return array(
+			'value'   => sanitize_text_field( isset( $suggestion['value'] ) ? $suggestion['value'] : '' ),
+			'name'    => sanitize_text_field( $name ),
+			'inn'     => sanitize_text_field( isset( $data['inn'] ) ? $data['inn'] : '' ),
+			'kpp'     => sanitize_text_field( isset( $data['kpp'] ) ? $data['kpp'] : '' ),
+			'ogrn'    => sanitize_text_field( isset( $data['ogrn'] ) ? $data['ogrn'] : '' ),
+			'address' => sanitize_text_field(
+				isset( $data['address']['value'] ) ? $data['address']['value'] : ''
+			),
+		);
+	}
+
+	/**
+	 * Enqueue frontend scripts only when needed.
+	 */
+	public static function enqueue_frontend() {
+		if ( is_admin() || is_feed() || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) ) {
+			return;
+		}
+
+		$options = self::options();
+
+		if ( '1' === $options['tracking_enabled'] ) {
+			wp_enqueue_script(
+				'dadata-suggestions-tracking',
+				plugins_url( 'assets/tracking.js', __FILE__ ),
+				array(),
+				DADATA_SUGG_VERSION,
+				true
+			);
+		}
+
+		if (
+			'1' !== $options['dadata_enabled']
+			|| '' === trim( $options['dadata_token'] )
+			|| '' === trim( $options['inn_selector'] )
+		) {
+			return;
+		}
+
+		wp_enqueue_script(
+			'dadata-suggestions-inn',
+			plugins_url( 'assets/dadata-inn.js', __FILE__ ),
+			array(),
+			DADATA_SUGG_VERSION,
+			true
+		);
+
+		wp_localize_script(
+			'dadata-suggestions-inn',
+			'DadataSuggestions',
+			array(
+				'restUrl'  => esc_url_raw( rest_url( self::REST_NAMESPACE . '/party' ) ),
+				'nonce'    => wp_create_nonce( 'wp_rest' ),
+				'selectors' => array(
+					'inn'     => $options['inn_selector'],
+					'name'    => $options['name_selector'],
+					'kpp'     => $options['kpp_selector'],
+					'ogrn'    => $options['ogrn_selector'],
+					'address' => $options['address_selector'],
+				),
+			)
+		);
+	}
+
+	/**
+	 * Plugin row settings link.
+	 *
+	 * @param string[] $links Existing links.
+	 * @return string[]
+	 */
+	public static function action_links( $links ) {
+		array_unshift(
+			$links,
+			sprintf(
+				'<a href="%s">%s</a>',
+				esc_url( admin_url( 'options-general.php?page=dadata-suggestions' ) ),
+				esc_html__( 'Settings', 'dadata-suggestions' )
+			)
+		);
+
+		return $links;
+	}
 }
 
-// --- Settings page ---
-
-add_action('admin_menu', function () {
-    add_options_page('DaData Suggestions', 'DaData Suggestions', 'manage_options', 'dadata-suggestions', 'dadata_suggestions_settings_page');
-});
-
-add_action('admin_init', function () {
-    register_setting('dadata_suggestions', DADATA_SUGG_OPTION, 'dadata_suggestions_sanitize');
-});
-
-function dadata_suggestions_sanitize($input) {
-    $out = array();
-    foreach (dadata_suggestions_defaults() as $key => $default) {
-        if ($key === 'enabled') {
-            $out[$key] = empty($input[$key]) ? '0' : '1';
-            continue;
-        }
-        $out[$key] = isset($input[$key]) ? sanitize_text_field($input[$key]) : $default;
-    }
-    return $out;
-}
-
-// AJAX: проверка ключа прямо из админки, без сохранения настроек
-add_action('wp_ajax_dadata_suggestions_test_key', function () {
-    check_ajax_referer('dadata_suggestions_test');
-    if (!current_user_can('manage_options')) wp_send_json_error('нет прав');
-
-    $key = isset($_POST['api_key']) ? sanitize_text_field($_POST['api_key']) : '';
-    if (!$key) wp_send_json_error('ключ пустой');
-
-    $resp = wp_remote_post('https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address', array(
-        'headers' => array(
-            'Content-Type'  => 'application/json',
-            'Accept'        => 'application/json',
-            'Authorization' => 'Token ' . $key,
-        ),
-        'body'    => wp_json_encode(array('query' => 'москва')),
-        'timeout' => 10,
-    ));
-
-    if (is_wp_error($resp)) {
-        wp_send_json_error($resp->get_error_message());
-    }
-    $code = wp_remote_retrieve_response_code($resp);
-    if ($code === 200) {
-        wp_send_json_success();
-    }
-    wp_send_json_error('HTTP ' . $code . ' — проверьте ключ на dadata.ru/profile');
-});
-
-function dadata_suggestions_settings_page() {
-    if (!current_user_can('manage_options')) return;
-    $o = dadata_suggestions_get_options();
-    $test_nonce = wp_create_nonce('dadata_suggestions_test');
-    ?>
-    <div class="wrap">
-        <h1>DaData Suggestions</h1>
-        <p>Свой API-ключ (Token) — в личном кабинете на <a href="https://dadata.ru/profile/#info" target="_blank">dadata.ru</a>.
-           В поле селектора можно указать несколько через запятую: <code>#billing_address_1, #shipping_address_1</code>. Пустой селектор — тип подсказки не подключается.</p>
-        <form method="post" action="options.php">
-            <?php settings_fields('dadata_suggestions'); ?>
-            <table class="form-table">
-                <tr>
-                    <th>Плагин включён</th>
-                    <td><label><input type="checkbox" name="<?php echo DADATA_SUGG_OPTION; ?>[enabled]" value="1" <?php checked($o['enabled'], '1'); ?>> подключать скрипты на сайте</label></td>
-                </tr>
-                <tr>
-                    <th><label for="api_key">API-ключ (Token)</label></th>
-                    <td>
-                        <input type="text" class="regular-text" id="api_key" name="<?php echo DADATA_SUGG_OPTION; ?>[api_key]" value="<?php echo esc_attr($o['api_key']); ?>">
-                        <button type="button" class="button" id="dadata-test-key">Проверить ключ</button>
-                        <span id="dadata-test-result"></span>
-                    </td>
-                </tr>
-                <tr>
-                    <th colspan="2"><hr></th>
-                </tr>
-                <tr>
-                    <th><label for="address_selector">Адрес — селектор(ы)</label></th>
-                    <td><input type="text" class="regular-text" id="address_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[address_selector]" value="<?php echo esc_attr($o['address_selector']); ?>" placeholder="#billing_address_1"></td>
-                </tr>
-                <tr>
-                    <th><label for="address_postcode_selector">— автозаполнить индекс в</label></th>
-                    <td><input type="text" class="regular-text" id="address_postcode_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[address_postcode_selector]" value="<?php echo esc_attr($o['address_postcode_selector']); ?>" placeholder="#billing_postcode"></td>
-                </tr>
-                <tr>
-                    <th><label for="address_city_selector">— автозаполнить город в</label></th>
-                    <td><input type="text" class="regular-text" id="address_city_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[address_city_selector]" value="<?php echo esc_attr($o['address_city_selector']); ?>" placeholder="#billing_city"></td>
-                </tr>
-                <tr>
-                    <th><label for="address_region_selector">— автозаполнить регион в</label></th>
-                    <td><input type="text" class="regular-text" id="address_region_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[address_region_selector]" value="<?php echo esc_attr($o['address_region_selector']); ?>" placeholder="#billing_state"></td>
-                </tr>
-                <tr>
-                    <th colspan="2">
-                        <button type="button" class="button" id="dadata-woo-preset">Заполнить как для WooCommerce checkout</button>
-                    </th>
-                </tr>
-                <tr>
-                    <th colspan="2"><hr></th>
-                </tr>
-                <tr>
-                    <th><label for="fio_selector">ФИО — селектор(ы)</label></th>
-                    <td><input type="text" class="regular-text" id="fio_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[fio_selector]" value="<?php echo esc_attr($o['fio_selector']); ?>" placeholder="#your-name"></td>
-                </tr>
-                <tr>
-                    <th><label for="party_selector">Организация / ИНН — селектор(ы)</label></th>
-                    <td><input type="text" class="regular-text" id="party_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[party_selector]" value="<?php echo esc_attr($o['party_selector']); ?>" placeholder="#company"></td>
-                </tr>
-                <tr>
-                    <th><label for="email_selector">Email — селектор(ы)</label></th>
-                    <td><input type="text" class="regular-text" id="email_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[email_selector]" value="<?php echo esc_attr($o['email_selector']); ?>" placeholder="#your-email"></td>
-                </tr>
-                <tr>
-                    <th><label for="bank_selector">Банк (БИК) — селектор(ы)</label></th>
-                    <td><input type="text" class="regular-text" id="bank_selector" name="<?php echo DADATA_SUGG_OPTION; ?>[bank_selector]" value="<?php echo esc_attr($o['bank_selector']); ?>" placeholder="#bank-bic"></td>
-                </tr>
-            </table>
-            <?php submit_button(); ?>
-        </form>
-    </div>
-    <script>
-    (function(){
-        document.getElementById('dadata-test-key').addEventListener('click', function(){
-            var btn = this, result = document.getElementById('dadata-test-result');
-            var key = document.getElementById('api_key').value;
-            result.textContent = 'проверка...';
-            btn.disabled = true;
-            var body = new URLSearchParams();
-            body.set('action', 'dadata_suggestions_test_key');
-            body.set('_ajax_nonce', '<?php echo esc_js($test_nonce); ?>');
-            body.set('api_key', key);
-            fetch(ajaxurl, { method: 'POST', credentials: 'same-origin', body: body })
-                .then(function(r){ return r.json(); })
-                .then(function(data){
-                    result.textContent = data.success ? '✓ ключ рабочий' : '✗ ' + (data.data || 'ошибка');
-                    result.style.color = data.success ? 'green' : 'red';
-                })
-                .catch(function(){ result.textContent = '✗ ошибка запроса'; result.style.color = 'red'; })
-                .finally(function(){ btn.disabled = false; });
-        });
-        document.getElementById('dadata-woo-preset').addEventListener('click', function(){
-            document.getElementById('address_selector').value = '#billing_address_1, #shipping_address_1';
-            document.getElementById('address_postcode_selector').value = '#billing_postcode';
-            document.getElementById('address_city_selector').value = '#billing_city';
-            document.getElementById('address_region_selector').value = '#billing_state';
-            document.getElementById('email_selector').value = '#billing_email';
-        });
-    })();
-    </script>
-    <?php
-}
-
-// --- Frontend enqueue ---
-
-add_action('wp_enqueue_scripts', function () {
-    $o = dadata_suggestions_get_options();
-    if ($o['enabled'] !== '1' || empty($o['api_key'])) return;
-
-    $has_selector = $o['address_selector'] || $o['fio_selector'] || $o['party_selector'] || $o['email_selector'] || $o['bank_selector'];
-    if (!$has_selector) return;
-
-    wp_enqueue_script(
-        'dadata-suggestions-lib',
-        'https://cdn.jsdelivr.net/gh/hflabs/suggestions-jquery@' . DADATA_SUGG_LIB_VERSION . '/dist/jquery.suggestions.min.js',
-        array('jquery'),
-        DADATA_SUGG_LIB_VERSION,
-        true
-    );
-
-    wp_enqueue_script(
-        'dadata-suggestions-init',
-        plugins_url('assets/dadata-init.js', __FILE__),
-        array('dadata-suggestions-lib'),
-        '1.1.0',
-        true
-    );
-
-    wp_localize_script('dadata-suggestions-init', 'dadataSuggestionsSettings', array(
-        'token'           => $o['api_key'],
-        'address'         => $o['address_selector'],
-        'addressPostcode' => $o['address_postcode_selector'],
-        'addressCity'     => $o['address_city_selector'],
-        'addressRegion'   => $o['address_region_selector'],
-        'fio'             => $o['fio_selector'],
-        'party'           => $o['party_selector'],
-        'email'           => $o['email_selector'],
-        'bank'            => $o['bank_selector'],
-    ));
-});
+Dadata_Suggestions_Plugin::init();

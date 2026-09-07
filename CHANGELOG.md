@@ -1,19 +1,14 @@
 # Changelog
 
+## 2.0.0
+
+- Focused the plugin on DaData INN/company lookup.
+- Replaced frontend token usage with a server-side REST proxy.
+- Added explicit enable/disable setting for DaData requests and scripts.
+- Added optional field mapping for company name, KPP, OGRN, and address.
+- Kept UTM and `pageref` forwarding as a separate optional frontend script.
+- Added uninstall cleanup for single-site and Multisite installs.
+
 ## 1.1.0
 
-Текущая версия по `dadata-suggestions.php` (`Version: 1.1.0`, тег `v1.1.0`).
-Отдельного changelog по более ранним изменениям не велось — история в
-`git log`. Документация репозитория (`README.md`, этот файл, `LICENSE`)
-добавлена позже, без изменений в самом плагине.
-
-Функциональность на этой версии:
-
-- Настройки: включение плагина, ключ API DaData, селекторы для адреса (с
-  автозаполнением индекса/города/региона), ФИО, организации/ИНН, email,
-  банка (БИК).
-- Проверка ключа по AJAX прямо из формы настроек, без сохранения.
-- Пресет «как для WooCommerce checkout» для селекторов адреса и email.
-- Подключение `hflabs/suggestions-jquery` с CDN и локализованный
-  init-скрипт (`assets/dadata-init.js`), которые выводятся на фронтенде
-  только когда плагин включён, ключ задан и хотя бы один селектор заполнен.
+- Earlier implementation with multiple DaData suggestion types.

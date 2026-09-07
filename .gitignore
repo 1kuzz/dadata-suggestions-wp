@@ -1,0 +1,12 @@
+.DS_Store
+Thumbs.db
+*.log
+*.sql
+*.sqlite
+*.zip
+.env
+.env.*
+node_modules/
+vendor/
+coverage/
+.phpunit.result.cache

@@ -1,71 +1,122 @@
-# DaData Suggestions
+# DaData INN Suggestions
 
-Плагин для WordPress подключает подсказки [DaData](https://dadata.ru/)
-(адрес, ФИО, организация/ИНН, email, банк по БИК) к полям форм на сайте —
-через готовую библиотеку `hflabs/suggestions-jquery` и один ключ API,
-задаваемый в настройках.
+WordPress plugin for DaData company suggestions by INN or company name.
 
-Это плагин для **одиночного** сайта WordPress. Если сайт — часть
-**WordPress Multisite** сети и подсказки нужно включать по отдельным сайтам
-и страницам из одной точки, а не настраивать на каждом сайте свой ключ —
-используйте интеграцию DaData Suggestions в
-[`ksp-utm-tracking`](https://github.com/1kuzz/utm-plugin-for-wp) (репозиторий
-`utm-plugin-for-wp`): там тот же набор подсказок и полей, но с сетевым
-ключом API, разрешением по сайтам из Network Admin и включением по
-конкретным страницам на каждом сайте. Этот репозиторий стал источником
-вдохновения для той версии — логика подсказок и селекторы полей одинаковы,
-отличается только уровень управления.
+The plugin adds autocomplete to a configured form field, sends requests through a
+WordPress REST endpoint, and keeps the DaData token on the server. It can also
+forward saved UTM parameters and `pageref` to external links.
 
-## Установка
+## Requirements
 
-1. Скопируйте `dadata-suggestions.php` и `assets/` в
-   `wp-content/plugins/dadata-suggestions/`.
-2. Активируйте плагин в Плагины → Установленные плагины.
-3. Откройте Настройки → DaData Suggestions.
+- WordPress 5.8 or newer
+- PHP 7.4 or newer
+- DaData account with a Suggestions API token
 
-## Настройка
+Tested on WordPress Multisite 6.9 with PHP 8.1.
 
-Свой API-ключ (Token) — в личном кабинете на
-[dadata.ru/profile/#info](https://dadata.ru/profile/#info). Кнопка
-«Проверить ключ» делает тестовый запрос к API DaData прямо из формы
-настроек, без сохранения.
+## Installation
 
-Для каждого типа подсказки указывается один или несколько CSS-селекторов
-через запятую (`#billing_address_1, #shipping_address_1`); пустой селектор —
-этот тип подсказки не подключается вовсе:
+### WordPress admin
 
-| Тип подсказки | Поле | Дополнительно |
-|---|---|---|
-| Адрес | `address_selector` | При выборе подсказки может автозаполнить индекс, город и регион в отдельных полях (`address_postcode_selector`, `address_city_selector`, `address_region_selector`) |
-| ФИО | `fio_selector` | — |
-| Организация / ИНН | `party_selector` | — |
-| Email | `email_selector` | — |
-| Банк (БИК) | `bank_selector` | — |
+1. Create a ZIP that contains the plugin directory:
+   `dadata-suggestions/dadata-suggestions.php`, `assets/`, and `uninstall.php`.
+2. In WordPress admin, open Plugins, Add New, Upload Plugin.
+3. Upload the ZIP and activate it.
 
-Кнопка «Заполнить как для WooCommerce checkout» подставляет типовые
-селекторы стандартной формы оформления заказа WooCommerce (`#billing_*`).
+On Multisite, network activation is supported. Settings are stored per site, so
+each site can enable DaData only where it is needed.
 
-Скрипты подключаются на фронтенде только если плагин включён, ключ указан и
-хотя бы один селектор заполнен — иначе `wp_enqueue_scripts` ничего не
-добавляет.
+### Manual
 
-## Как это работает
+Copy this repository to:
 
-- `dadata-suggestions.php` регистрирует страницу настроек (Settings API),
-  AJAX-обработчик проверки ключа (`wp_ajax_dadata_suggestions_test_key`) и
-  подключение скриптов на `wp_enqueue_scripts`.
-- `assets/dadata-init.js` читает локализованные настройки
-  (`dadataSuggestionsSettings`) и для каждого заполненного селектора вызывает
-  `jQuery(selector).suggestions({ token, type })` из библиотеки
-  `hflabs/suggestions-jquery`, подключаемой с jsDelivr.
-- Настройки хранятся в одной опции `dadata_suggestions_options`
-  (`add_option`/`register_setting`), значение по умолчанию — плагин включён,
-  ключ и все селекторы пусты (то есть без явной настройки ничего не
-  подключается).
+```text
+wp-content/plugins/dadata-suggestions/
+```
 
-## Ограничения
+Then activate **DaData INN Suggestions** in WordPress admin.
 
-- Один ключ API и один набор селекторов на весь сайт — нет постраничного
-  включения и нет управления сетью на WordPress Multisite (см. ссылку выше).
-- Библиотека подсказок подключается с CDN (`cdn.jsdelivr.net`), локальной
-  копии в репозитории нет.
+## Configuration
+
+Open Settings, DaData INN.
+
+Required settings:
+
+- Enable **DaData INN suggestions**.
+- Paste the DaData API token.
+- Set the INN/company field selector. The default is `#company`.
+
+Optional selectors fill extra fields after a company is selected:
+
+- company name
+- KPP
+- OGRN
+- address
+
+Selectors can be any valid CSS selector, including comma-separated selectors.
+If a selector does not match anything on the page, the script skips it.
+
+## How It Works
+
+When DaData is disabled, the DaData script is not loaded and no DaData requests
+are sent.
+
+When DaData is enabled, the frontend script waits until the configured field has
+at least 3 characters, debounces input for 300 ms, and calls:
+
+```text
+/wp-json/dadata-suggestions/v1/party
+```
+
+The REST endpoint verifies the WordPress REST nonce, calls DaData's Suggestions
+API endpoint for organizations, and returns only the fields the frontend needs.
+API errors return an empty UI state instead of breaking the page.
+
+DaData token storage:
+
+- stored in the WordPress option `dadata_suggestions_options`
+- sent only from the server to DaData as `Authorization: Token ...`
+- never localized into frontend JavaScript
+
+## Link Tracking
+
+If link tracking is enabled, `assets/tracking.js` stores incoming UTM parameters
+in `sessionStorage` and appends missing UTM values plus `pageref` to external
+HTTP/HTTPS links on click.
+
+`pageref` is derived from the current page path. For example:
+
+```text
+/events/company-form/ -> events-company-form
+```
+
+Add `data-no-track` or `data-dadata-no-track` to a link to skip tracking.
+
+## Security
+
+Do not commit real DaData tokens. Use the WordPress settings page on each site.
+
+The public REST endpoint requires a WordPress REST nonce and proxies requests
+server-side so the browser never receives the DaData token.
+
+## Troubleshooting
+
+- Suggestions do not appear: check that DaData is enabled, the token is saved,
+  and the INN selector matches an input on the page.
+- Token rejected: confirm the token in the DaData profile and check server
+  outbound HTTPS access to `suggestions.dadata.ru`.
+- Field selector not found: inspect the form field in the browser and update
+  the selector in Settings, DaData INN.
+- API unavailable: the field remains usable as a normal input; check WordPress
+  PHP logs and the browser Network tab for the REST request.
+- Multisite: activate the plugin network-wide if needed, then configure each
+  site separately under its own Settings, DaData INN screen.
+
+## Files
+
+```text
+dadata-suggestions.php   Plugin bootstrap, settings, REST proxy.
+assets/dadata-inn.js     Frontend autocomplete.
+assets/tracking.js       UTM and pageref forwarding.
+uninstall.php            Option cleanup.
+```
